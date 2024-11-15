@@ -1,0 +1,6 @@
+black
+ipython
+jira
+jiracli
+keyring
+pyyaml

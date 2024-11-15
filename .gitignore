@@ -1,0 +1,8 @@
+# direnv, venvs, etc.
+.envrc
+.venv
+venv
+
+# exclude all yaml files except for the examples
+*.yaml
+!*.example.yaml

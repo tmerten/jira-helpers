@@ -1,0 +1,24 @@
+# The base URL for the Jira instance you want to use
+base_url: 'https://jira.example.com'
+# Username and password are optional here.
+# You can also provide them as
+# JIRA_USERNAME and JIRA_API_TOKEN environment variables
+username:
+password:
+# The jira project you want to create the support vanguard issues in
+project_key: 'SE'
+# The jira board you want to create the support vanguard issues in
+board_id: '1234'
+# The issue key of an epic that you want to create the support vanguard issues under
+vanguard_epic_key: SE-42
+# The name of your sprints. Must include `${sprint_number}` placeholder
+sprint_template: 2025#${sprint_number}
+# From which sprint to start assigning vanguards?
+sprint_starting_number:
+# The people (email addresses as on Jira) to assign to the support vanguard
+people_queue:
+   - person1@example.com
+   - person2@example.com
+   - person3@example.com
+   - person4@example.com
+   - person5@example.com
