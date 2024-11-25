@@ -3,6 +3,9 @@
 .venv
 venv
 
+# cache
+__pycache__
+
 # exclude all yaml files except for the examples
 *.yaml
 !*.example.yaml

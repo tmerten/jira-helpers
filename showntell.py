@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-This script creates Support Vanguard issues for a given Jira Board and Sprint Name
-under the epic identified by `vanguard_epic_key`.
+This script creates Show and Tell issues for a given Jira Board and Sprint Name
+under the epic identified by `epic_key`.
 
-Configure this script with the `support_vanguard.yaml` file
-(see support_vanguard.example.yaml for an example configuration).
+Configure this script with the `showntell.yaml` file
+(see showntell.example.yaml for an example configuration).
 
 You can also inject environment variables prefixed with JIRA_ for every configuration option.
 For example to inject the api_token use JIRA_API_TOKEN as environment variable.
@@ -29,28 +29,28 @@ logger = logging.getLogger("jira_helpers")
 logger.setLevel(logging.INFO)
 
 
-class Vanguard(CreateAndAssignTasks):
+class ShowNTell(CreateAndAssignTasks):
     """
-    This class wraps the support vanguard assignment vor convenience
+    This class wraps the show and tell assignment for convenience
     """
 
     def __init__(self):
         """Inject correct support file in super class"""
-        super(Vanguard, self).__init__("support_vanguard.yaml")
+        super(ShowNTell, self).__init__("showntell.yaml")
 
     def issue_data(self, epic, sname, idx, formatted_start_date):
         return {
             "project": {"key": self.project_key},
-            "summary": f"Support Vanguard for {sname} week {idx%2 + 1} ({formatted_start_date})",
+            "summary": f"Show and Tell for {sname} week {idx%2 + 1} ({formatted_start_date})",
             "description": (
-                f"Provide support Vanguard for the week from {formatted_start_date}.\n\n"
-                "See https://discourse.maas.io/t/the-support-vanguard/4658 for more details."
+                f"It is your turn for a show and tell in the week from {formatted_start_date}.\n\n"
+                "See https://discourse.maas.io/t/show-and-tell/4620 for more details.\n\n"
+                "Please add a comment to this issue whether you have a topic you would like to present in public or not."
             ),
             "issuetype": {"name": "Task"},  # Assuming the task type is named as such
             "parent": {"id": epic.id},
         }
 
-
 if __name__ == "__main__":
-    vanguard = Vanguard()
-    vanguard.run()
+    showntell = ShowNTell()
+    showntell.run()
