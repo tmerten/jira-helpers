@@ -13,14 +13,12 @@ To inject a people_queue use comma separated values in the environment variable:
 
 from abc import ABC, abstractmethod
 import os
-from datetime import datetime, timedelta
 import logging
-from string import Template
 import yaml
 
-from jira import JIRA, JIRAError
+from jira import JIRA
 
-logger = logging.getLogger("jira_helpers")
+logger = logging.getLogger('jira_helpers')
 
 class JiraConnector(ABC):
     """
@@ -65,13 +63,13 @@ class JiraConnector(ABC):
         self.configure()
 
         if len(self._config_errors) > 0:
-            print("The following errors have been encountered in the configuration:")
+            print('The following errors have been encountered in the configuration:')
             for error in self._config_errors:
                 print(error)
             exit(1)
 
         # Authenticate with JIRA server and create a client
-        logger.debug(f"logging in to Jira as {username}")
+        logger.debug(f'logging in to Jira as {username}')
         self.jira = JIRA(base_url, basic_auth=(username, api_token))
 
     @abstractmethod
@@ -85,20 +83,22 @@ class JiraConnector(ABC):
         #  self.people = self.read_list_from_yaml_or_environment("people_queue")
         pass
 
-    def _read_from_yaml_or_environment(self, name: str) -> str | list[str] | None:
+    def _read_from_yaml_or_environment(self, name: str) -> str | list[str] | bool | None:
         """
         Tries to read the variable `name` from the key `name`
         in the YAML file or from an `JIRA_NAME` environment variable.
         """
-        value = self._yaml_config.get(name)
+        value = os.environ.get(f'JIRA_{name.upper()}')
+        logger.debug(f'env  - {name}: {value}')
 
         if not value:
-            value = os.environ.get(f"JIRA_{name.upper()}")
+            value = self._yaml_config.get(name)
+            logger.debug(f'yaml - {name}: {value}')
 
-        if not value:
-            error = f"- {name} setting is missing.\n"
-            error += f"    Try to add {name} as key to {self.config_file} or\n"
-            error += f"    define a JIRA_{name.upper()} environment variable"
+        if not value and type(value) != list and type(value) != bool:
+            error = f'- {name} setting is missing.\n'
+            error += f'    Try to add {name} as key to {self.config_file} or\n'
+            error += f'    define a JIRA_{name.upper()} environment variable'
             self._config_errors.append(error)
 
         return value
@@ -110,7 +110,8 @@ class JiraConnector(ABC):
         raw_value = self._read_from_yaml_or_environment(name)
 
         if isinstance(raw_value, str):
-            return raw_value.split(",")
+            split = raw_value.split(",")
+            return [] if len(split) == 1 and split[0] == '' else split
 
         if isinstance(raw_value, list):
             return raw_value
@@ -126,7 +127,7 @@ class JiraConnector(ABC):
         if isinstance(raw_value, str):
             return raw_value
 
-        return ""
+        return ''
 
     def _read_int_from_yaml_or_environment(self, name: str) -> int:
         """
@@ -138,7 +139,7 @@ class JiraConnector(ABC):
             try:
                 return int(raw_value)
             except ValueError:
-                error = f"- {name} is not an integer."
+                error = f'- {name} is not an integer.'
                 self._config_errors.append(error)
 
         return 0
@@ -151,6 +152,8 @@ class JiraConnector(ABC):
 
         if isinstance(raw_value, str):
             return raw_value.lower() in ['true', '1', 't', 'y', 'yes']
+        elif isinstance(raw_value, bool):
+            return raw_value
         else:
             # in case it is None we assume it is falsy
             return False
