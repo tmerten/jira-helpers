@@ -34,7 +34,7 @@ logger = logging.getLogger("jira_helpers")
 
 class CreateAndAssignTasks(JiraConnector, ABC):
     """
-    This class wraps the support vanguard assignment vor convenience
+    This class wraps the creating and assigning issues to a people queue
     """
 
     # the jira project key
@@ -43,7 +43,7 @@ class CreateAndAssignTasks(JiraConnector, ABC):
     # the board to be scanned for existing issues
     board_id: str
 
-    # the epic under which support vanguard issues should be added
+    # the epic under which the issues should be added
     epic_key: str
 
     # the year of the sprints (used to determine the sprint numbering)
@@ -59,7 +59,7 @@ class CreateAndAssignTasks(JiraConnector, ABC):
     dry_run: bool
 
     def __init__(self, config_file):
-        """Inject correct support file in super class"""
+        """Inject correct configuration file in super class"""
         super(CreateAndAssignTasks, self).__init__(config_file)
 
     def configure(self):
@@ -80,7 +80,7 @@ class CreateAndAssignTasks(JiraConnector, ABC):
         """Sprint name from year, starting number and pulse"""
         try:
             template = Template(self.sprint_template).substitute(
-                sprint_number=self.sprint_starting_number + index
+                sprint_number=f"{self.sprint_starting_number + index:02d}"
             )
             logger.debug(f"Sprint template compiled to: {template}")
             return template
@@ -142,8 +142,8 @@ class CreateAndAssignTasks(JiraConnector, ABC):
         # Check if there are enough sprints for our vanguards to be assigned to
         if len(sprints) < vanguards_to_assign / 2 + 1:
             print(
-                f"There are only {len(sprints)} sprints for {vanguards_to_assign} support vanguards.\n"
-                f"Please create at least {math.ceil(vanguards_to_assign / 2) + 1 - len(sprints)} sprints first or assign no more than { vanguards_to_assign - len(sprints * 2) } vanguards."
+                f"There are only {len(sprints)} sprints for {vanguards_to_assign} people.\n"
+                f"Please create at least {math.ceil(vanguards_to_assign / 2) + 1 - len(sprints)} sprints first or assign no more than { vanguards_to_assign - len(sprints * 2) } people."
             )
             exit(3)
 
@@ -160,31 +160,31 @@ class CreateAndAssignTasks(JiraConnector, ABC):
             )
             exit(4)
 
-        # check if there already are support issues for this sprint
+        # check if there already are existing issues for this sprint
         # * we do not want to create duplicates and
         # * we want to make sure that we create an issue for the second sprint week
         #   if one exists for the first week
-        support_issues_in_sprint = self.jira.search_issues(
+        issues_in_sprint = self.jira.search_issues(
             f'project = "{self.project_key}" AND sprint = {first_sprint.id}'
-            f' AND parent = {vanguard_epic.key} AND status = Untriaged'
+            f' AND parent = {vanguard_epic.key}'
         )
 
         start_from = 0
-        match (len(support_issues_in_sprint)):
+        match (len(issues_in_sprint)):
             case 0:
                 logger.info(
-                    f"No support vanguard issues found in sprint {first_sprint}. "
+                    f"No issues found in sprint {first_sprint}. "
                     "I will crate two support vanguard issues."
                 )
             case 1:
                 logger.info(
-                    f"No support vanguard issue found in sprint {first_sprint}. "
+                    f"One issue found in sprint {first_sprint}. "
                     "I will create one more issue for the second week."
                 )
                 start_from = 1
             case _:
                 logger.info(
-                    f"Found {len(support_issues_in_sprint)} support vanguard issues.\n"
+                    f"Found {len(issues_in_sprint)} issues.\n"
                     "This should not be the case. Exiting. "
                     f"Are you sure sprint {self.sprint_starting_number} is correct?"
                 )
