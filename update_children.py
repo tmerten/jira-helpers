@@ -76,55 +76,59 @@ class UpdateChildren(JiraConnector):
         """
         root_components: list[Component] = self.root.fields.components
         child_components: list[Component] = child.fields.components
-        to_be_components: list[Component]
+        to_be_components: list[dict[str,str]]
 
         root_labels: list[str] = self.root.fields.labels
         child_labels: list[str] = child.fields.labels
         to_be_labels: list[str]
 
-        root_version = self.root.version
-        child_version = child.version
-        to_be_version = ""
+        root_versions = self.root.fields.fixVersions
+        child_versions = child.fields.fixVersions
+        to_be_versions = []
 
         if 'components' in self.overwrite:
             logger.debug('overwriting components')
-            to_be_components = root_components
+            to_be_components = []
+            for component in root_components:
+                to_be_components.append({'name': component.name})
         else:
-            logger.debug('adding root components')
-            to_be_components = list(set(root_components).union(child_components))
+            logger.debug('adding root components to childrens components')
+            to_be_components = []
+            for component in list(set(root_components).union(child_components)):
+                to_be_components.append({'name': component.name})
 
         if 'labels' in self.overwrite:
             logger.debug('overwriting labels')
-            to_be_labels = root_labels
+            to_be_labels = list(root_labels)
         else:
-            logger.debug('adding root labels')
+            logger.debug('adding root labels to childrens labels')
             to_be_labels = list(set(root_labels).union(child_labels))
 
-        # FIXME: if this continues to be the same, this should be generic
-        if 'version' in self.overwrite:
-            logger.debug('overwriting version')
-            to_be_version = root_version
+        if 'versions' in self.overwrite:
+            logger.debug('overwriting versions')
+            to_be_versions = [ version.raw for version in list(root_versions) ]
         else:
-            logger.debug('adding root labels')
-            to_be_version = list(set(root_version).union(child_version))
+            logger.debug('adding root versions to childrens versions')
+            to_be_versions = [ version.raw for version in list(set(root_versions).union(child_versions)) ]
 
         if self.dry_run:
             print(f'{child.key}: {child.fields.summary}')
             print(f'Components as is : {format_components(child_components)}')
-            print(f'Components to be : {format_components(to_be_components)}')
+            print(f'Components to be : {to_be_components}')
             print(f'Would update the following labels')
             print(f'Labels as is : {child_labels}')
             print(f'Labels to be : {to_be_labels}')
             print(f'Would update the following version')
-            print(f'Version as is : {child_version}')
-            print(f'Version to be : {to_be_version}')
+            print(f'Version as is : {child_versions}')
+            print(f'Version to be : {to_be_versions}')
             print()
         else:
-            child.update(fields = {
+            data = {
                 'components': to_be_components,
                 'labels': to_be_labels,
-                'version': to_be_version
-            })
+                'fixVersions': to_be_versions
+            }
+            child.update(fields = data)
 
     def walk_children(self, parent):
         children: ResultList[Issue]|dict[str, Any] = self.jira.search_issues(f'parent={parent}')
