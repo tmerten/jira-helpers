@@ -49,7 +49,6 @@ class UpdateChildren(JiraConnector):
     This class updates properties of an issue recursively for all its children
     """
     issue_key: str
-    project_key: str
     overwrite: list[str]
     dry_run: bool
     children: list[Issue]
@@ -64,7 +63,6 @@ class UpdateChildren(JiraConnector):
     def configure(self):
         """Vanguard specific configuration options"""
         self.issue_key = self._read_str_from_yaml_or_environment("issue_key")
-        self.project_key = self._read_str_from_yaml_or_environment("project_key")
         self.overwrite= self._read_list_from_yaml_or_environment("overwrite")
         self.dry_run = self._read_bool_from_yaml_or_environment("dry_run")
         self.children = []
@@ -142,7 +140,8 @@ class UpdateChildren(JiraConnector):
         try:
             issue: Issue = self.jira.issue(self.issue_key)
             self.root = issue
-        except JIRAError:
+        except JIRAError as e:
+            print(e)
             print(f'Issue with key {self.issue_key} not found.')
             exit(1)
 
