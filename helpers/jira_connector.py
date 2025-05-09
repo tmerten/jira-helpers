@@ -127,7 +127,7 @@ class JiraConnector(ABC):
         if isinstance(raw_value, str):
             return raw_value
 
-        return ''
+        raise ValueError(f"Cannot read string value for {raw_value}")
 
     def _read_int_from_yaml_or_environment(self, name: str) -> int:
         """
@@ -141,8 +141,10 @@ class JiraConnector(ABC):
             except ValueError:
                 error = f'- {name} is not an integer.'
                 self._config_errors.append(error)
+        if isinstance(raw_value, int):
+            return raw_value
 
-        return 0
+        raise ValueError(f"Cannot read integer value for {raw_value}")
 
     def _read_bool_from_yaml_or_environment(self, name: str) -> bool:
         """
