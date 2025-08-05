@@ -9,9 +9,9 @@ want to make sure that all epics and children are moved as well.
 (Note that you can use automation for this. This script is for the cases
 where you want to have control over the exact changes)
 
-Make sure to configure the variables below, especially 
-- username 
-- API token 
+Make sure to configure the variables below, especially
+- username
+- API token
 """
 
 import logging
@@ -48,10 +48,6 @@ class UpdateChildren(JiraConnector):
     """
     This class updates properties of an issue recursively for all its children
     """
-    issue_key: str
-    project_key: str
-    overwrite: list[str]
-    dry_run: bool
     children: list[Issue]
 
     root: Issue
@@ -59,15 +55,23 @@ class UpdateChildren(JiraConnector):
     def __init__(self):
         """Inject correct support file in super class"""
         super(UpdateChildren, self).__init__("update_children.yaml")
+        self.children = []
 
 
     def configure(self):
         """Vanguard specific configuration options"""
-        self.issue_key = self._read_str_from_yaml_or_environment("issue_key")
-        self.project_key = self._read_str_from_yaml_or_environment("project_key")
-        self.overwrite= self._read_list_from_yaml_or_environment("overwrite")
-        self.dry_run = self._read_bool_from_yaml_or_environment("dry_run")
-        self.children = []
+        self.parser.add_argument('-i', '--issue',
+            help='The key of the issue to process.')
+        self.parser.add_argument('-a', '--append', action='extend', nargs='*',
+            help='Which fields to add to the children. Can be one of '
+                 '"components", "labels", "versions". '
+                 # cannot make values mutually exclusive only args :(
+                 'Note that "-o" takes precedence over "-a".')
+        self.parser.add_argument('-o', '--overwrite', action='extend', nargs='*',
+            help='Whether to exactly copy the parent. Like "-a" but, '
+                 'deletes all attributes in the children '
+                 'that are not present in the parent. '
+                 'If you specify "-o" you do not need "-a".')
 
     def update_child(self, child):
         """
@@ -76,51 +80,47 @@ class UpdateChildren(JiraConnector):
         """
         root_components: list[Component] = self.root.fields.components
         child_components: list[Component] = child.fields.components
-        to_be_components: list[dict[str,str]]
+        to_be_components: list[dict[str,str]] = []
 
         root_labels: list[str] = self.root.fields.labels
         child_labels: list[str] = child.fields.labels
-        to_be_labels: list[str]
+        to_be_labels: list[str] = []
 
-        root_versions = self.root.fields.fixVersions
-        child_versions = child.fields.fixVersions
-        to_be_versions = []
+        root_versions: list[Any] = self.root.fields.fixVersions
+        child_versions: list[Any] = child.fields.fixVersions
+        to_be_versions: list[str] = []
 
-        if 'components' in self.overwrite:
-            logger.debug('overwriting components')
-            to_be_components = []
+        logger.debug(f'appending {self.args.append}')
+        logger.debug(f'overwriting {self.args.overwrite}')
+
+        if self.args.overwrite and 'components' in self.args.overwrite:
             for component in root_components:
                 to_be_components.append({'name': component.name})
-        else:
-            logger.debug('adding root components to childrens components')
-            to_be_components = []
+        elif self.args.append and 'components' in self.args.append:
             for component in list(set(root_components).union(child_components)):
                 to_be_components.append({'name': component.name})
 
-        if 'labels' in self.overwrite:
-            logger.debug('overwriting labels')
-            to_be_labels = list(root_labels)
-        else:
-            logger.debug('adding root labels to childrens labels')
+        if self.args.overwrite and 'labels' in self.args.overwrite:
             to_be_labels = list(set(root_labels).union(child_labels))
+        elif self.args.append and 'labels' in self.args.append:
+            to_be_labels = list(root_labels)
 
-        if 'versions' in self.overwrite:
-            logger.debug('overwriting versions')
-            to_be_versions = [ version.raw for version in list(root_versions) ]
-        else:
-            logger.debug('adding root versions to childrens versions')
+        if self.args.overwrite and 'versions' in self.args.overwrite:
             to_be_versions = [ version.raw for version in list(set(root_versions).union(child_versions)) ]
+        elif self.args.append and 'versions' in self.args.append:
+            to_be_versions = [ version.raw for version in list(root_versions) ]
 
-        if self.dry_run:
+        if self.args.dry_run:
             print(f'{child.key}: {child.fields.summary}')
-            print(f'Components as is : {format_components(child_components)}')
-            print(f'Components to be : {to_be_components}')
-            print(f'Would update the following labels')
-            print(f'Labels as is : {child_labels}')
-            print(f'Labels to be : {to_be_labels}')
-            print(f'Would update the following version')
-            print(f'Version as is : {child_versions}')
-            print(f'Version to be : {to_be_versions}')
+            print('Running this would update the following components')
+            print(f' - Components as is : {format_components(child_components)}')
+            print(f' - Components to be : {list(map(lambda c : c['name'], to_be_components))}')
+            print('Running this would update the following labels')
+            print(f' - Labels as is : {child_labels}')
+            print(f' - Labels to be : {to_be_labels}')
+            print('Running this would update the following version')
+            print(f' - Version as is : {child_versions}')
+            print(f' - Version to be : {to_be_versions}')
             print()
         else:
             data = {
@@ -131,6 +131,10 @@ class UpdateChildren(JiraConnector):
             child.update(fields = data)
 
     def walk_children(self, parent):
+        """
+        Recursively gathers all children from the parent and adds them
+        to the list of self.children to be processed
+        """
         children: ResultList[Issue]|dict[str, Any] = self.jira.search_issues(f'parent={parent}')
         assert type(children) is ResultList
 
@@ -140,17 +144,18 @@ class UpdateChildren(JiraConnector):
 
     def run(self):
         try:
-            issue: Issue = self.jira.issue(self.issue_key)
+            issue: Issue = self.jira.issue(self.args.issue)
             self.root = issue
-        except JIRAError:
-            print(f'Issue with key {self.issue_key} not found.')
+        except JIRAError as je:
+            print(je)
+            print(f'Issue with key {self.args.issue} not found.')
             exit(1)
 
         self.walk_children(self.root)
 
         for node in self.children:
             self.update_child(node)
-        
+
 
 if __name__ == "__main__":
     update = UpdateChildren()

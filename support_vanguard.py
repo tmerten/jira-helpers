@@ -40,7 +40,7 @@ class Vanguard(CreateAndAssignTasks):
 
     def issue_data(self, epic, sname, idx, formatted_start_date):
         return {
-            "project": {"key": self.project_key},
+            "project": {"key": self.args.project},
             "summary": f"Support Vanguard for {sname} week {idx%2 + 1} ({formatted_start_date})",
             "description": (
                 f"Provide support Vanguard for the week from {formatted_start_date}.\n\n"

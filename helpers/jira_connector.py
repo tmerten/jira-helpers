@@ -12,11 +12,14 @@ To inject a people_queue use comma separated values in the environment variable:
 """
 
 from abc import ABC, abstractmethod
-import os
+import argparse
 import logging
 import yaml
 
 from jira import JIRA
+
+from helpers.actions import EnvDefault, RequiredOrDefault
+
 
 logger = logging.getLogger('jira_helpers')
 
@@ -30,16 +33,16 @@ class JiraConnector(ABC):
     """
 
     # internal representation of the configuration
-    _yaml_config = {}
-
-    # errors in the configuration to be reported later
-    _config_errors: list[str] = []
+    _yaml_config:dict = {}
 
     _config_file: str
 
+    parser: argparse.ArgumentParser
+
+    args: argparse.Namespace
+
     # the jira client instance
     jira: JIRA
-
 
     def __init__(self, config_file):
         """
@@ -48,28 +51,58 @@ class JiraConnector(ABC):
         and establish connection to Jira
         """
         self.config_file = config_file
+        self.parser = argparse.ArgumentParser(
+            prog='Jira Helper'
+        )
 
+        # add default values from config files
+        logger.debug(f'trying to load defaults from {self.config_file}')
         with open(self.config_file) as stream:
             try:
                 self._yaml_config = yaml.safe_load(stream)
+                self.parser.set_defaults(**self._yaml_config)
             except yaml.YAMLError as exc:
                 print(exc)
                 exit(1)
 
-        base_url: str = self._read_str_from_yaml_or_environment("base_url")
-        username: str = self._read_str_from_yaml_or_environment("username")
-        api_token: str = self._read_str_from_yaml_or_environment("api_token")
+        self.parser.add_argument('-b', '--base-url', required=True, action=RequiredOrDefault,
+            help='The URL of your Jira instance.')
+        self.parser.add_argument('-u', '--username', required=True, action=RequiredOrDefault,
+            help='The username to login to Jira.')
+        self.parser.add_argument('-t', '--api-token', required=True, action=EnvDefault, envvar='JIRA_API_TOKEN',
+            help='The jira API token, can also be specified as JIRA_URL environment variable.')
+        group = self.parser.add_mutually_exclusive_group()
+        group.add_argument('-dry', '--dry-run', dest='dry_run', action='store_true',
+            help='Do not actually change anything, perform a dry run.')
+        group.add_argument('-no-dry', '--no-dry-run', dest='dry_run', action='store_false',
+            help='Overwrite a dry run setting from config file.')
+        self.parser.add_argument('-v', '--verbose', action='store_true',
+            help='Show debug logging output.', )
 
+        # let sub-classes inject their own parameters
         self.configure()
 
-        if len(self._config_errors) > 0:
-            print('The following errors have been encountered in the configuration:')
-            for error in self._config_errors:
-                print(error)
-            exit(1)
+        with open(self.config_file) as stream:
+            try:
+                self._yaml_config = yaml.safe_load(stream)
+                self.parser.set_defaults(**self._yaml_config)
+            except yaml.YAMLError as exc:
+                print(exc)
+                exit(1)
+
+        # update args from command line and environment variables
+        # overrides config file defaults above
+        self.args = self.parser.parse_args()
+
+        if self.args.verbose:
+            logger.setLevel(logging.DEBUG)
+
+        base_url: str = self.args.base_url
+        username: str = self.args.username
+        api_token: str = self.args.api_token
 
         # Authenticate with JIRA server and create a client
-        logger.debug(f'logging in to Jira as {username}')
+        logger.debug(f'logging in to Jira at {base_url} as {username}')
         self.jira = JIRA(base_url, basic_auth=(username, api_token))
 
     @abstractmethod
@@ -78,82 +111,6 @@ class JiraConnector(ABC):
         Overwrite this method to inject additional configuration options
         """
         # Your implementation will look something like this
-        #  self.sprint_template = self.read_str_from_yaml_or_environment("sprint_template")
-        #  self.number = self.read_int_from_yaml_or_environment("a_number")
-        #  self.people = self.read_list_from_yaml_or_environment("people_queue")
+        # self.parser.add_argument('-a', '--argument',
+        #    help='The argument I want to add in my subclass')
         pass
-
-    def _read_from_yaml_or_environment(self, name: str) -> str | list[str] | bool | None:
-        """
-        Tries to read the variable `name` from the key `name`
-        in the YAML file or from an `JIRA_NAME` environment variable.
-        """
-        value = os.environ.get(f'JIRA_{name.upper()}')
-        logger.debug(f'env  - {name}: {value}')
-
-        if not value:
-            value = self._yaml_config.get(name)
-            logger.debug(f'yaml - {name}: {value}')
-
-        if not value and type(value) != list and type(value) != bool:
-            error = f'- {name} setting is missing.\n'
-            error += f'    Try to add {name} as key to {self.config_file} or\n'
-            error += f'    define a JIRA_{name.upper()} environment variable'
-            self._config_errors.append(error)
-
-        return value
-
-    def _read_list_from_yaml_or_environment(self, name: str) -> list[str]:
-        """
-        Tries to convert the value to a list of strings
-        """
-        raw_value = self._read_from_yaml_or_environment(name)
-
-        if isinstance(raw_value, str):
-            split = raw_value.split(",")
-            return [] if len(split) == 1 and split[0] == '' else split
-
-        if isinstance(raw_value, list):
-            return raw_value
-
-        return []
-
-    def _read_str_from_yaml_or_environment(self, name: str) -> str:
-        """
-        Tries to convert the value to string
-        """
-        raw_value = self._read_from_yaml_or_environment(name)
-
-        if isinstance(raw_value, str):
-            return raw_value
-
-        return ''
-
-    def _read_int_from_yaml_or_environment(self, name: str) -> int:
-        """
-        Tries to convert the value to int
-        """
-        raw_value = self._read_from_yaml_or_environment(name)
-
-        if isinstance(raw_value, str):
-            try:
-                return int(raw_value)
-            except ValueError:
-                error = f'- {name} is not an integer.'
-                self._config_errors.append(error)
-
-        return 0
-
-    def _read_bool_from_yaml_or_environment(self, name: str) -> bool:
-        """
-        Tries to convert the value to boolean
-        """
-        raw_value = self._read_from_yaml_or_environment(name)
-
-        if isinstance(raw_value, str):
-            return raw_value.lower() in ['true', '1', 't', 'y', 'yes']
-        elif isinstance(raw_value, bool):
-            return raw_value
-        else:
-            # in case it is None we assume it is falsy
-            return False

@@ -38,17 +38,17 @@ class ShowNTell(CreateAndAssignTasks):
         """Inject correct support file in super class"""
         super(ShowNTell, self).__init__("showntell.yaml")
 
-    def issue_data(self, epic, sname, idx, formatted_start_date):
+    def issue_data(self, sname, week, formatted_start_date):
         return {
-            "project": {"key": self.project_key},
-            "summary": f"Show and Tell for {sname} week {idx%2 + 1} ({formatted_start_date})",
+            "project": {"key": self.args.project},
+            "summary": f"Show and Tell for {sname} week {week} ({formatted_start_date})",
             "description": (
                 f"It is your turn for a show and tell in the week from {formatted_start_date}.\n\n"
                 "See https://discourse.maas.io/t/show-and-tell/4620 for more details.\n\n"
                 "Please add a comment to this issue whether you have a topic you would like to present in public or not."
             ),
             "issuetype": {"name": "Task"},  # Assuming the task type is named as such
-            "parent": {"id": epic.id},
+            "parent": {"id": self.epic.id},
         }
 
 if __name__ == "__main__":

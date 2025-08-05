@@ -1,16 +1,13 @@
 """
-This class can be derived to create issues for a given Jira Board and Sprint Name
-under the epic identified by `epic_key`.
+This class can be derived with concrete implementations.
 
-Configure this script with the `yaml` file passed into its constructor.
+It can be used to create to create issues to plan recurring tasks
+that are to be rotated in a team (such as support vanguard or team presentations).
+It does this for a given Jira Board and Sprint name under the epic identified by `epic_key`.
+
+Configure this script with the `yaml` file passed into its constructor
+and or the options given to argparse in the `configuration` method
 (see support_vanguard.example.yaml for an example configuration).
-
-You can also inject environment variables prefixed with JIRA_ for every configuration option.
-For example to inject the api_token use JIRA_API_TOKEN as environment variable.
-To inject a people_queue use comma separated values in the environment variable:
-  export JIRA_PEOPLE_QUEUE=person1.example.com,person2.example.com
-
-TODOs and caveats:
 
 - You need to create the sprints manually first (the python client now seems to support it via JIRA.create_sprint)
   - Note that Jira will pick up your naming scheme if you keep creating sprints, so it's not too hard to prepare them
@@ -20,80 +17,62 @@ TODOs and caveats:
 """
 
 from abc import ABC, abstractmethod
-import math
+import sys
 
 from datetime import datetime, timedelta
 import logging
 from string import Template
 
-from jira import JIRAError
+from jira import Issue, JIRAError
+from jira.client import ResultList
+from jira.resources import Sprint
 
 from .jira_connector import JiraConnector
 
-logger = logging.getLogger("jira_helpers")
+logger = logging.getLogger('jira_helpers')
 
 class CreateAndAssignTasks(JiraConnector, ABC):
+
+    epic: Issue
+
     """
     This class wraps the creating and assigning issues to a people queue
     """
-
-    # the jira project key
-    project_key: str
-
-    # the board to be scanned for existing issues
-    board_id: str
-
-    # the epic under which the issues should be added
-    epic_key: str
-
-    # the year of the sprints (used to determine the sprint numbering)
-    sprint_template: str
-
-    # the sprint number to start creating issues for (used to determine the sprint numbering)
-    sprint_starting_number: int
-
-    # the people
-    assignee_queue: list[str]
-
-    # do not make any changes
-    dry_run: bool
-
     def __init__(self, config_file):
         """Inject correct configuration file in super class"""
         super(CreateAndAssignTasks, self).__init__(config_file)
 
     def configure(self):
         """Vanguard specific configuration options"""
-        self.project_key = self._read_str_from_yaml_or_environment("project_key")
-        self.board_id = self._read_str_from_yaml_or_environment("board_id")
-        self.epic_key = self._read_str_from_yaml_or_environment("epic_key")
-        self.sprint_template = self._read_str_from_yaml_or_environment(
-            "sprint_template"
-        )
-        self.sprint_starting_number = self._read_int_from_yaml_or_environment(
-            "sprint_starting_number"
-        )
-        self.assignee_queue = self._read_list_from_yaml_or_environment("people_queue")
-        self.dry_run = self._read_bool_from_yaml_or_environment("dry_run")
+        self.parser.add_argument('-p', '--project',
+            help='The Jira project key.')
+        self.parser.add_argument('-B', '--board',
+            help='The Jira board to be scanned for existing issues.')
+        self.parser.add_argument('-e', '--epic',
+            help='The epic under which the issues should be added.')
+        self.parser.add_argument('--sprint-template',
+            help='The sprint template. It is highly recommended to configure this in the config file.')
+        self.parser.add_argument('-a', '--assignee', nargs='+',
+            help='The list of assignees. It is highly recommended to configure this in the config file.')
 
     def sprint_name(self, index: int = 0) -> str:
         """Sprint name from year, starting number and pulse"""
         try:
-            template = Template(self.sprint_template).substitute(
-                sprint_number=f"{self.sprint_starting_number + index:02d}"
+            template = Template(self.args.sprint_template).substitute(
+                sprint_number=f'{self.args.sprint_starting_number + index:02d}'
             )
-            logger.debug(f"Sprint template compiled to: {template}")
+            logger.debug(f'Sprint template compiled to: {template}')
             return template
         except KeyError:
-            print("Your sprint template needs to contain `${sprint_number}`")
+            sys.stderr.write('Your sprint template needs to contain `${sprint_number}`')
             exit(1)
 
-    def create_and_assign_issue(self, data: dict, email: str, sprint_id: int):
-        if self.dry_run:
-            logger.info(
-                f"I would create the following issue for {email} and sprint {sprint_id}:"
+    def assign_issue(self, data: dict, email: str, sprint_id: int):
+        if self.args.dry_run:
+            print(
+                f'I would create the following issue for {email} and sprint {sprint_id}:'
             )
-            logger.info(data)
+            print(data)
         else:
             created = self.jira.create_issue(data)
             self.jira.assign_issue(created.key, email)
@@ -101,12 +80,12 @@ class CreateAndAssignTasks(JiraConnector, ABC):
             'customfield_10020': sprint_id,  # 10020 is the custom field for sprints
             })
             logger.debug(
-                f"created issue for {email} and sprint {sprint_id}:"
+                f'created issue for {email} and sprint {sprint_id}:'
             )
             logger.debug(data)
 
     @abstractmethod
-    def issue_data(self, epic, sname, idx, formatted_start_date):
+    def issue_data(self, sname, week, formatted_start_date):
         """
         Needs to returns an object in the form of
         {
@@ -127,102 +106,83 @@ class CreateAndAssignTasks(JiraConnector, ABC):
         """
         return {}
 
+    def prepare_and_assign_issue(self, sprint, assignee_email, week):
+        start_date = datetime.strptime(sprint.startDate, '%Y-%m-%dT%H:%M:%S.%fZ')
+        days = 1 if week == 1 else 8
+
+        issue_data = self.issue_data(
+            sprint.name,
+            week,
+            (start_date + timedelta(days=days)).strftime('%Y-%m-%d')
+        )
+        self.assign_issue(
+            issue_data,
+            assignee_email,
+            sprint.id
+        )
+
     def run(self):
         try:
-            vanguard_epic = self.jira.issue(self.epic_key)
+            self.epic = self.jira.issue(self.args.epic)
         except JIRAError:
-            print(f"Vanguard Epic {self.epic_key} to create issues under not found.")
+            sys.stderr.write(f"Epic {self.args.epic} to create child issues not found.")
             exit(2)
 
         # Get the sprints for the given scrum board
-        sprints = list(self.jira.sprints(board_id=self.board_id, state="active,future"))
+        logger.debug(f'getting active and future sprints for board {self.args.board}')
+        sprints: ResultList[Sprint] = self.jira.sprints(board_id=self.args.board, state='active,future')
+        sprints_to_assign = list()
+        issues_in_first_sprint = -1 
 
-        vanguards_to_assign = len(self.assignee_queue)
-
-        # Check if there are enough sprints for our vanguards to be assigned to
-        if len(sprints) < vanguards_to_assign / 2 + 1:
-            print(
-                f"There are only {len(sprints)} sprints for {vanguards_to_assign} people.\n"
-                f"Please create at least {math.ceil(vanguards_to_assign / 2) + 1 - len(sprints)} sprints first or assign no more than { vanguards_to_assign - len(sprints * 2) } people."
-            )
-            exit(3)
-
-        # check if the first sprint is the current one or a sprint in the future
-        # * we do not want to assign vanguards to sprints that ended
-        first_sprint_name = self.sprint_name()
-        try:
-            first_sprint = next(
-                sprint for sprint in sprints if sprint.name == first_sprint_name
-            )
-        except StopIteration:
-            print(
-                f"Sprint {first_sprint_name} is not a current or future sprint. I cannot continue."
-            )
-            exit(4)
-
-        # check if there already are existing issues for this sprint
-        # * we do not want to create duplicates and
-        # * we want to make sure that we create an issue for the second sprint week
-        #   if one exists for the first week
-        issues_in_sprint = self.jira.search_issues(
-            f'project = "{self.project_key}" AND sprint = {first_sprint.id}'
-            f' AND parent = {vanguard_epic.key}'
-        )
-
-        start_from = 0
-        match (len(issues_in_sprint)):
-            case 0:
-                logger.info(
-                    f"No issues found in sprint {first_sprint}. "
-                    "I will crate two support vanguard issues."
-                )
-            case 1:
-                logger.info(
-                    f"One issue found in sprint {first_sprint}. "
-                    "I will create one more issue for the second week."
-                )
-                start_from = 1
-            case _:
-                logger.info(
-                    f"Found {len(issues_in_sprint)} issues.\n"
-                    "This should not be the case. Exiting. "
-                    f"Are you sure sprint {self.sprint_starting_number} is correct?"
-                )
-                exit(5)
-
-        for idx, mail in enumerate(self.assignee_queue, start_from):
-            # the sprint number increments every second week (index)
-            logger.debug(mail)
-            sprint_count = int((idx) / 2)
-            # check if we can find the sprint by name, otherwise we don't want to continue
-            sname = self.sprint_name(sprint_count)
-
-            try:
-                sprint = next(sprint for sprint in sprints if sprint.name == sname)
-            except StopIteration:
-                print(
-                    f"Sprint with name {sname} not found, please create your sprints first."
-                )
-                exit(6)
-
-            start_date = datetime.strptime(sprint.startDate, "%Y-%m-%dT%H:%M:%S.%fZ")
-
-            # As the sprint starts on midnight, we need to add one extra day to make sure it's Monday
-            # TODO: Bold assumption, also timezone issues?
-            if idx % 2 == 1:
-                start_date = start_date + timedelta(days=8)
+        for sprint in sprints:
+            if issues_in_first_sprint >= 0:
+                # we already found the sprint to start with
+                sprints_to_assign.append(sprint)
             else:
-                start_date = start_date + timedelta(days=1)
+                issues_in_sprint = len(self.jira.search_issues(
+                    f'project = "{self.args.project}" AND sprint = {sprint.id}'
+                    f' AND parent = {self.epic.key}'
+                ))
+                if issues_in_sprint < 2:
+                    logger.debug(f'Found first sprint: {sprint}')
+                    sprints_to_assign.append(sprint)
+                    issues_in_first_sprint = issues_in_sprint
+                else:
+                    print(f'Found two or more issues in sprint {sprint}. Continue searching...')
 
-            formatted_start_date = start_date.strftime("%Y-%m-%d")
+        assignee_idx = 0
+        for sprint in sprints_to_assign:
+            logger.debug(f'Processing sprint {sprint}')
+            start_date = datetime.strptime(sprint.startDate, '%Y-%m-%dT%H:%M:%S.%fZ')
+            end_date = datetime.strptime(sprint.endDate, '%Y-%m-%dT%H:%M:%S.%fZ')
+            length = end_date - start_date
+            logger.debug(f'sprint length {length.days}')
+            assignee_email = self.args.assignee[assignee_idx]
+            if length.days < 8:
+                # Long sprints usually are 10 days (Monday to next Thursday),
+                # short ones are 3 days.
+                if issues_in_first_sprint == 1:
+                    logger.debug('short sprint and first issues already taken')
+                    print(f'Continueing, no space in sprint {sprint.name} for another issue')
+                else:
+                    logger.debug('short sprint can create one issue')
+                    self.prepare_and_assign_issue(sprint, assignee_email, 1)
+            else:
+                if issues_in_first_sprint == 1:
+                    logger.debug('long/standard sprint can create one issue for second week')
+                    self.prepare_and_assign_issue(sprint, assignee_email, 2)
+                else:
+                    logger.debug('long/standard sprint can create one two issues')
+                    self.prepare_and_assign_issue(sprint, assignee_email, 1)
+                    assignee_idx +=1
 
-            issue_data = self.issue_data(
-                vanguard_epic, sname, idx, formatted_start_date
-            )
-
-            # until here we did not create/write anything to Jira
-            try:
-                self.create_and_assign_issue(issue_data, mail, sprint.id)
-            except JIRAError as e:
-                print("An error occurred while creating or updating the issue:", str(e))
-                exit(10)
+                    assignee_email = self.args.assignee[assignee_idx]
+                    self.prepare_and_assign_issue(sprint, assignee_email, 2)
+            issues_in_first_sprint = 0
+            assignee_idx +=1
+        
+        if assignee_idx < len(self.args.assignee):
+            print('Not enough sprints to assign the following people')
+            while assignee_idx < len(self.args.assignee):
+                print(f' - {self.args.assignee[assignee_idx]}')
+                assignee_idx +=1
