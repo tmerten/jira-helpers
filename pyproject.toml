@@ -1,0 +1,11 @@
+[project]
+name = "jira-helpers"
+version = "0.1.0"
+description = "Various Jira helper scripts"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "jira>=3.10.5",
+    "pyyaml>=6.0.2",
+    "ruff>=0.12.7",
+]
