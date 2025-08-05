@@ -9,3 +9,6 @@ __pycache__
 # exclude all yaml files except for the examples
 *.yaml
 !*.example.yaml
+
+# asdf
+.tool-versions
