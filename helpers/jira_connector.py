@@ -44,6 +44,7 @@ class JiraConnector(ABC):
     # the jira client instance
     jira: JIRA
 
+
     def __init__(self, config_file):
         """
         Load yaml file and try to read config settings
